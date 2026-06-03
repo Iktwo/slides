@@ -5,14 +5,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draganddrop.awtTransferable
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toComposeImageBitmap
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.Image as SkiaImage
@@ -37,7 +40,8 @@ actual fun ImageDropArea(
     content: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val target = remember(onImagesDropped) {
+    val onImagesDroppedRef = rememberUpdatedState(onImagesDropped)
+    val target = remember {
         object : DragAndDropTarget {
             override fun onDrop(event: DragAndDropEvent): Boolean {
                 val transferable = try {
@@ -55,10 +59,9 @@ actual fun ImageDropArea(
                 scope.launch {
                     val bytes = withContext(Dispatchers.IO) {
                         files.flatMap { collectImages(it) }
-                            .filter { it.isFile && it.extension.lowercase() in IMAGE_EXTENSIONS }
                             .map { it.readBytes() }
                     }
-                    if (bytes.isNotEmpty()) onImagesDropped(bytes)
+                    if (bytes.isNotEmpty()) onImagesDroppedRef.value(bytes)
                 }
                 return true
             }
@@ -75,8 +78,9 @@ actual fun ImageDropArea(
 }
 
 private fun collectImages(file: File): List<File> =
-    if (file.isDirectory) file.walkTopDown().filter { it.isFile }.toList()
-    else listOf(file)
+    if (file.isDirectory) file.walkTopDown().filter { it.isFile && it.extension.lowercase() in IMAGE_EXTENSIONS }.toList()
+    else if (file.extension.lowercase() in IMAGE_EXTENSIONS) listOf(file)
+    else emptyList()
 
 actual fun decodeImage(bytes: ByteArray): ImageBitmap? =
     runCatching { SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap() }.getOrNull()
@@ -106,15 +110,16 @@ actual fun openImagePicker(onImagesPicked: (List<ByteArray>) -> Unit) {
         }
         if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
             val selected = chooser.selectedFiles.toList()
-            Thread {
-                val bytes = selected
-                    .flatMap { collectImages(it) }
-                    .filter { it.isFile && it.extension.lowercase() in IMAGE_EXTENSIONS }
-                    .map { it.readBytes() }
-                if (bytes.isNotEmpty()) {
-                    javax.swing.SwingUtilities.invokeLater { onImagesPicked(bytes) }
+            CoroutineScope(Dispatchers.Unconfined + SupervisorJob()).launch {
+                val bytes = withContext(Dispatchers.IO) {
+                    selected.flatMap { collectImages(it) }
+                        .filter { it.isFile && it.extension.lowercase() in IMAGE_EXTENSIONS }
+                        .map { it.readBytes() }
                 }
-            }.start()
+                if (bytes.isNotEmpty()) {
+                    onImagesPicked(bytes)
+                }
+            }
         }
     }
 }

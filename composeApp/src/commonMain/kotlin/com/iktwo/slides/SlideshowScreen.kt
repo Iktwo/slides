@@ -1,15 +1,22 @@
 package com.iktwo.slides
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -22,6 +29,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -44,30 +52,49 @@ import kotlin.random.Random
 fun SlideshowScreen(state: SlideshowState, onExit: () -> Unit) {
     if (state.images.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("No images", color = Color.White)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("No images", color = Color.White)
+                Spacer(Modifier.height(16.dp))
+                TextButton(onClick = onExit) {
+                    Text("Back to Lobby", color = Color.White.copy(alpha = 0.7f))
+                }
+            }
         }
         return
     }
 
-    val focusReq = remember { FocusRequester() }
+    val focusReq = FocusRequester()
     var slideSeed by remember { mutableStateOf(1L) }
     var currentSlide by remember { mutableStateOf(0) }
+    var previousSlideIndex by remember { mutableStateOf<Int?>(null) }
+    var showHints by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        delay(5000)
+        showHints = false
+    }
 
     val slides = remember(
         state.images.size,
         state.mode,
         state.gridCount,
         state.random,
-        slideSeed,
+        if (state.random) slideSeed else -1L,
     ) {
         buildSlidePlan(state, slideSeed)
     }
 
-    LaunchedEffect(Unit) { focusReq.requestFocus() }
-    LaunchedEffect(currentSlide) { focusReq.requestFocus() }
+    LaunchedEffect(slideSeed) {
+        currentSlide = currentSlide.coerceAtMost(slides.size - 1)
+    }
+
+    LaunchedEffect(Unit) {
+        focusReq.requestFocus()
+    }
 
     val advance: () -> Unit = {
         if (slides.isNotEmpty()) {
+            previousSlideIndex = currentSlide
             if (currentSlide + 1 >= slides.size) {
                 slideSeed += 1
                 currentSlide = 0
@@ -77,11 +104,18 @@ fun SlideshowScreen(state: SlideshowState, onExit: () -> Unit) {
         }
     }
     val back: () -> Unit = {
-        currentSlide = (currentSlide - 1).coerceAtLeast(0)
+        previousSlideIndex?.let { idx ->
+            currentSlide = idx
+        } ?: run {
+            currentSlide = (currentSlide - 1).coerceAtLeast(0)
+        }
     }
     val advanceLatest by rememberUpdatedState(advance)
     val backLatest by rememberUpdatedState(back)
     val exitLatest by rememberUpdatedState(onExit)
+    val slidesLatest by rememberUpdatedState(slides)
+    val intervalLatest by rememberUpdatedState(state.intervalMs)
+    val repeatLatest by rememberUpdatedState(state.repeat)
 
     DisposableEffect(Unit) {
         installSlideshowKeys(
@@ -92,16 +126,18 @@ fun SlideshowScreen(state: SlideshowState, onExit: () -> Unit) {
         onDispose { uninstallSlideshowKeys() }
     }
 
-    LaunchedEffect(state.intervalMs, slides.size, currentSlide, state.repeat) {
-        if (slides.isEmpty()) return@LaunchedEffect
-        delay(state.intervalMs)
-        if (currentSlide + 1 >= slides.size) {
-            if (state.repeat) {
-                slideSeed += 1
-                currentSlide = 0
+    LaunchedEffect(intervalLatest, repeatLatest) {
+        while (true) {
+            delay(intervalLatest)
+            if (slidesLatest.isEmpty()) continue
+            if (currentSlide + 1 >= slidesLatest.size) {
+                if (repeatLatest) {
+                    slideSeed += 1
+                    currentSlide = 0
+                }
+            } else {
+                currentSlide += 1
             }
-        } else {
-            currentSlide += 1
         }
     }
 
@@ -113,6 +149,7 @@ fun SlideshowScreen(state: SlideshowState, onExit: () -> Unit) {
             .focusable()
             .onPreviewKeyEvent { ev ->
                 if (ev.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                showHints = false
                 when (ev.key) {
                     Key.Escape -> { onExit(); true }
                     Key.DirectionRight, Key.Spacebar, Key.PageDown -> { advance(); true }
@@ -121,6 +158,19 @@ fun SlideshowScreen(state: SlideshowState, onExit: () -> Unit) {
                 }
             },
     ) {
+        if (showHints) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+                    .alpha(0.7f),
+            ) {
+                HintChip("← →", "Navigate")
+                HintChip("Space", "Next")
+                HintChip("Esc", "Exit")
+            }
+        }
         val slide = slides.getOrNull(currentSlide)
         if (slide != null) {
             val layoutSeed =
@@ -136,6 +186,32 @@ fun SlideshowScreen(state: SlideshowState, onExit: () -> Unit) {
             onClick = onExit,
             modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
         ) { Text("Exit", color = Color.White) }
+    }
+}
+
+@Composable
+private fun HintChip(key: String, label: String) {
+    Surface(
+        color = Color.Black.copy(alpha = 0.6f),
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+            Text(
+                text = key,
+                color = Color.White,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Text(
+                text = label,
+                color = Color.White.copy(alpha = 0.6f),
+                style = MaterialTheme.typography.labelSmall,
+            )
+        }
     }
 }
 
@@ -196,7 +272,7 @@ private fun PhasedGrid(images: List<ImageBitmap>, zoom: Boolean, seed: Long) {
         val layout = remember(ordered, zoom, seed, containerAspect) {
             if (zoom) phasedLayout(ordered.size, seed)
             else masonryLayout(
-                aspects = ordered.map { it.width.toFloat() / it.height.toFloat().coerceAtLeast(1f) },
+                   aspects = ordered.map { (it.width.toFloat() / it.height.toFloat()).coerceAtLeast(1f) },
                 containerAspect = containerAspect,
             )
         }
@@ -213,8 +289,8 @@ private fun PhasedGrid(images: List<ImageBitmap>, zoom: Boolean, seed: Long) {
                     .background(Color.Black),
             ) {
                 if (zoom) {
-                    val focus = focusDetector.focus(img, seed + i)
-                    val zoomFactor = randomZoomFactor(seed + i)
+                    val focus = LocalFocusDetector.current.focus(img, seed + i)
+                    val zoomFactor = rememberRandomZoomFactor(seed + i)
                     ZoomedImage(img, focus, zoomFactor, Modifier.fillMaxSize())
                 } else {
                     Image(
@@ -223,46 +299,6 @@ private fun PhasedGrid(images: List<ImageBitmap>, zoom: Boolean, seed: Long) {
                         contentScale = ContentScale.Fit,
                         modifier = Modifier.fillMaxSize(),
                     )
-                }
-            }
-        }
-    }
-}
-
-private const val MAX_ZOOM_FACTOR = 1.7f
-
-internal fun randomZoomFactor(seed: Long): Float {
-    val rng = kotlin.random.Random(seed)
-    return 1f + rng.nextFloat() * (MAX_ZOOM_FACTOR - 1f)
-}
-
-@Composable
-private fun ZoomedImage(
-    image: ImageBitmap,
-    focus: Offset,
-    zoomFactor: Float,
-    modifier: Modifier,
-) {
-    Canvas(modifier) {
-        val iw = image.width.toFloat()
-        val ih = image.height.toFloat()
-        if (size.width <= 0f || size.height <= 0f || iw <= 0f || ih <= 0f) return@Canvas
-        val canvasAspect = size.width / size.height
-        val imgAspect = iw / ih
-        val fillScale = if (imgAspect > canvasAspect) size.height / ih else size.width / iw
-        val scale = fillScale * zoomFactor.coerceIn(1f, MAX_ZOOM_FACTOR)
-        val scaledW = iw * scale
-        val scaledH = ih * scale
-        val focusX = focus.x * scaledW
-        val focusY = focus.y * scaledH
-        val txMin = (size.width - scaledW).coerceAtMost(0f)
-        val tyMin = (size.height - scaledH).coerceAtMost(0f)
-        val tx = (size.width / 2f - focusX).coerceIn(txMin, 0f)
-        val ty = (size.height / 2f - focusY).coerceIn(tyMin, 0f)
-        clipRect {
-            translate(tx, ty) {
-                scale(scale, scale, pivot = Offset.Zero) {
-                    drawImage(image)
                 }
             }
         }

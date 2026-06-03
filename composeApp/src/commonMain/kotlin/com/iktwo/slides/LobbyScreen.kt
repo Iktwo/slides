@@ -1,6 +1,5 @@
 package com.iktwo.slides
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -30,21 +29,22 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Surface
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.material3.rememberTooltipState
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.PlainTooltip
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Slider
-import androidx.compose.material3.Surface
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
-import androidx.compose.material3.TooltipAnchorPosition
-import androidx.compose.material3.TooltipBox
-import androidx.compose.material3.TooltipDefaults
-import androidx.compose.material3.rememberTooltipState
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,18 +55,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.drawscope.clipRect
-import androidx.compose.ui.graphics.drawscope.scale
-import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -86,12 +83,36 @@ private fun Tip(text: String, content: @Composable () -> Unit) {
 @Composable
 fun LobbyScreen(state: SlideshowState) {
     val scope = rememberCoroutineScope()
+    var loadingCount by remember { mutableStateOf(0) }
+    var loadError by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(loadError) {
+        if (loadError != null) {
+            delay(4000)
+            loadError = null
+        }
+    }
+
     val addBytes: (List<ByteArray>) -> Unit = { bytes ->
         scope.launch {
-            val bmps = withContext(Dispatchers.Default) {
-                bytes.mapNotNull { decodeImage(it) }
+            loadingCount += bytes.size
+            try {
+                val bmps = withContext(Dispatchers.Default) {
+                    val decoded = bytes.mapIndexed { i, b ->
+                        val result = decodeImage(b)
+                        if (result == null) {
+                            withContext(Dispatchers.Main) {
+                                loadError = "Failed to decode image #$i"
+                            }
+                        }
+                        result
+                    }.filterNotNull()
+                    decoded
+                }
+                state.images.addAll(bmps)
+            } finally {
+                loadingCount -= bytes.size
             }
-            state.images.addAll(bmps)
         }
     }
     ImageDropArea(
@@ -128,7 +149,34 @@ fun LobbyScreen(state: SlideshowState) {
 
             Spacer(Modifier.height(16.dp))
             ConfigPanel(state)
-            Spacer(Modifier.height(16.dp))
+            if (loadingCount > 0) {
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                ) {
+                    CircularProgressIndicator(
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp),
+                        color = Color.White.copy(alpha = 0.6f),
+                    )
+                    Text(
+                        text = "Loading $loadingCount image${if (loadingCount > 1) "s" else ""}...",
+                        color = Color.White.copy(alpha = 0.6f),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+            if (loadError != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = loadError!!,
+                    color = Color(0xFFFF6B6B),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -192,7 +240,7 @@ private fun PreviewContent(state: SlideshowState) {
         if (state.images.isEmpty()) slotCount
         else slotCount.coerceAtMost(state.images.size).coerceAtLeast(1)
 
-    val sampleImages = remember(state.images.size, displayCount) {
+    val sampleImages = remember(state.images, displayCount) {
         if (state.images.isEmpty()) emptyList()
         else state.images.take(displayCount)
     }
@@ -203,7 +251,7 @@ private fun PreviewContent(state: SlideshowState) {
         if (state.shiftLayout && isGrid) {
             val delayMs = state.intervalMs.coerceAtLeast(PREVIEW_SHIFT_MIN_MS)
             while (true) {
-                kotlinx.coroutines.delay(delayMs)
+                delay(delayMs)
                 shiftTick++
             }
         } else {
@@ -248,7 +296,7 @@ private fun PreviewGrid(images: List<ImageBitmap>, count: Int, zoom: Boolean, se
                 ordered.isEmpty() -> phasedLayout(count, seed)
                 else -> masonryLayout(
                     aspects = ordered.map {
-                        it.width.toFloat() / it.height.toFloat().coerceAtLeast(1f)
+                        (it.width.toFloat() / it.height.toFloat()).coerceAtLeast(1f)
                     },
                     containerAspect = containerAspect,
                 )
@@ -263,13 +311,13 @@ private fun PreviewGrid(images: List<ImageBitmap>, count: Int, zoom: Boolean, se
                 modifier = Modifier
                     .offset(x = w * r.left, y = h * r.top)
                     .size(width = w * r.width, height = h * r.height)
-                    .padding(2.dp),
+                    .padding(3.dp),
             ) {
                 if (img == null) {
                     Placeholder(index = i + 1, modifier = Modifier.fillMaxSize())
                 } else if (zoom) {
-                    val zf = 1f + kotlin.random.Random(seed + i).nextFloat() * (PREVIEW_MAX_ZOOM - 1f)
-                    ZoomedPreview(img, focusDetector.focus(img, seed + i), zf, Modifier.fillMaxSize())
+                    val zf = rememberRandomZoomFactor(seed + i)
+                    ZoomedImage(img, LocalFocusDetector.current.focus(img, seed + i), zf, Modifier.fillMaxSize())
                 } else {
                     Image(
                         bitmap = img,
@@ -301,41 +349,6 @@ private fun Placeholder(index: Int, modifier: Modifier) {
     }
 }
 
-private const val PREVIEW_MAX_ZOOM = 1.7f
-
-@Composable
-private fun ZoomedPreview(
-    image: ImageBitmap,
-    focus: Offset,
-    zoomFactor: Float,
-    modifier: Modifier,
-) {
-    Canvas(modifier) {
-        val iw = image.width.toFloat()
-        val ih = image.height.toFloat()
-        if (size.width <= 0f || size.height <= 0f || iw <= 0f || ih <= 0f) return@Canvas
-        val canvasAspect = size.width / size.height
-        val imgAspect = iw / ih
-        val fillScale = if (imgAspect > canvasAspect) size.height / ih else size.width / iw
-        val scale = fillScale * zoomFactor.coerceIn(1f, PREVIEW_MAX_ZOOM)
-        val scaledW = iw * scale
-        val scaledH = ih * scale
-        val focusX = focus.x * scaledW
-        val focusY = focus.y * scaledH
-        val txMin = (size.width - scaledW).coerceAtMost(0f)
-        val tyMin = (size.height - scaledH).coerceAtMost(0f)
-        val tx = (size.width / 2f - focusX).coerceIn(txMin, 0f)
-        val ty = (size.height / 2f - focusY).coerceIn(tyMin, 0f)
-        clipRect {
-            translate(tx, ty) {
-                scale(scale, scale, pivot = Offset.Zero) {
-                    drawImage(image)
-                }
-            }
-        }
-    }
-}
-
 @Composable
 private fun Thumbnail(image: ImageBitmap, onRemove: () -> Unit) {
     Box(
@@ -354,9 +367,10 @@ private fun Thumbnail(image: ImageBitmap, onRemove: () -> Unit) {
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(4.dp)
-                .size(22.dp),
+                .size(48.dp)
+                .clip(CircleShape),
             shape = CircleShape,
-            color = Color.Black.copy(alpha = 0.55f),
+            color = Color.Transparent,
         ) {
             Box(
                 modifier = Modifier
@@ -364,11 +378,17 @@ private fun Thumbnail(image: ImageBitmap, onRemove: () -> Unit) {
                     .clickable(onClick = onRemove),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(
-                    text = "✕",
-                    color = Color.White,
-                    style = MaterialTheme.typography.labelMedium,
-                )
+                Surface(
+                    modifier = Modifier.size(22.dp),
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.55f),
+                ) {
+                    Text(
+                        text = "✕",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
             }
         }
     }
@@ -399,7 +419,7 @@ private fun ImagesPane(state: SlideshowState, modifier: Modifier) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(state.images, key = { it }) { img ->
+                    items(state.images, key = { it.width.toLong() * 1_000_000 + it.height }) { img ->
                         Thumbnail(image = img, onRemove = { state.images.remove(img) })
                     }
                 }
@@ -456,7 +476,7 @@ private fun ConfigPanel(state: SlideshowState) {
                     )
                     Slider(
                         value = state.gridCount.toFloat(),
-                        onValueChange = { state.gridCount = it.toInt().coerceIn(1, 12) },
+                        onValueChange = { state.gridCount = it.toInt() },
                         valueRange = 1f..12f,
                         steps = 10,
                         modifier = Modifier.width(200.dp),
@@ -489,7 +509,9 @@ private fun ConfigPanel(state: SlideshowState) {
                     label = { Text("Repeat") },
                 )
             }
-            IntervalInput(state)
+            Tip("Time between slides in auto-advance mode") {
+                IntervalInput(state)
+            }
         }
     }
 }

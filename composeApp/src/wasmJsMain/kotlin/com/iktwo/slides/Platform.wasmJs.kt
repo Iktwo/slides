@@ -163,7 +163,7 @@ actual fun saveConfigString(value: String) { lsSet(CONFIG_KEY, value) }
 @JsFun(
     """
     (onPicked) => {
-        const accept = ['jpg','jpeg','png','webp','bmp','gif','heic','heif','svg'];
+        const accept = ['jpg','jpeg','png','webp','bmp','gif','heic','heif'];
         const input = document.createElement('input');
         input.type = 'file';
         input.multiple = true;

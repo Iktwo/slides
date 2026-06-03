@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -16,11 +17,13 @@ fun App() {
         val state = rememberSlideshowState()
         val setFullscreen = LocalFullscreenControl.current
         LaunchedEffect(state.started) { setFullscreen(state.started) }
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            if (state.started) {
-                SlideshowScreen(state) { state.started = false }
-            } else {
-                LobbyScreen(state)
+        CompositionLocalProvider(LocalFocusDetector provides focusDetector) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                if (state.started) {
+                    SlideshowScreen(state) { state.started = false }
+                } else {
+                    LobbyScreen(state)
+                }
             }
         }
     }

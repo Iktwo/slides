@@ -1,6 +1,7 @@
 package com.iktwo.slides
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -40,6 +41,10 @@ class SlideshowState {
     var shiftLayout by mutableStateOf(false)
     var intervalMs by mutableStateOf(3000L)
     var started by mutableStateOf(false)
+
+    init {
+        gridCount = gridCount.coerceIn(1, 12)
+    }
 }
 
 @Composable
@@ -49,9 +54,15 @@ fun rememberSlideshowState(): SlideshowState {
     }
     LaunchedEffect(state) {
         @OptIn(kotlinx.coroutines.FlowPreview::class)
-        snapshotFlow {
-            state.serializeConfig()
-        }.debounce(200).collectLatest { saveConfigString(it) }
+        snapshotFlow { state.serializeConfig() }
+            .debounce(1500)
+            .collectLatest { saveConfigString(it) }
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            val config = state.serializeConfig()
+            if (config.isNotEmpty()) saveConfigString(config)
+        }
     }
     return state
 }

@@ -13,6 +13,8 @@ expect fun getPlatform(): Platform
 
 val LocalFullscreenControl = staticCompositionLocalOf<(Boolean) -> Unit> { {} }
 
+val LocalFocusDetector = staticCompositionLocalOf<FocusDetector> { RandomFocusDetector }
+
 @Composable
 expect fun ImageDropArea(
     onImagesDropped: (List<ByteArray>) -> Unit,
